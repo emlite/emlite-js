@@ -1,0 +1,29 @@
+{
+  "name": "emlite",
+  "version": "0.1.24",
+  "description": "A tiny JS bridge for C/C++/Rust/Zig via wasm",
+  "main": "src/emlite.js",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emlite/emlite-js.git"
+  },
+  "keywords": [
+    "wasm",
+    "wasi",
+    "polyfill",
+    "shim",
+    "webassembly"
+  ],
+  "author": "MoAlyousef",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/emlite/emlite-js/issues"
+  },
+  "homepage": "https://github.com/emlite/emlite-js#readme",
+  "devDependencies": {
+    "@eslint/js": "^9.29.0",
+    "eslint": "^9.29.0",
+    "globals": "^16.2.0"
+  }
+}
