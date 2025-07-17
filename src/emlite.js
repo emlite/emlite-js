@@ -3,7 +3,7 @@
 // 1.0.23 => 1000023
 // 11.0.23 => 11000023
 // version = (major × 1 000 000) + (minor × 1 000) + patch
-const EMLITE_VERSION = 1024;
+const EMLITE_VERSION = 1027;
 
 class HandleTable {
     constructor() {
