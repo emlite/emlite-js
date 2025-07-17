@@ -267,7 +267,7 @@ export class Emlite {
             emlite_print_object_map: () => console.log(HANDLE_MAP),
             emlite_reset_object_map: () => {
                 for (const h of [...HANDLE_MAP._h2e.keys()]) {
-                    if (h > 4) {
+                    if (h > 5) {
                         const value = HANDLE_MAP._h2e.get(h).value;
 
                         HANDLE_MAP._h2e.delete(h);
