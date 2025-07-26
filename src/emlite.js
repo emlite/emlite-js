@@ -3,7 +3,7 @@
 // 1.0.23 => 1000023
 // 11.0.23 => 11000023
 // version = (major × 1 000 000) + (minor × 1 000) + patch
-const EMLITE_VERSION = 1028;
+const EMLITE_VERSION = 1029;
 
 class HandleTable {
     constructor() {
@@ -177,7 +177,7 @@ export class Emlite {
      * @returns {Number} - represents the offset in memory of a null-terminated char array
      */
     copyStringToWasm(str) {
-        if (!str) return 0;
+        if (!str || typeof str !== "string") return 0;
         this._ensureViewsFresh();
         if (typeof this.exports.emlite_malloc !== "undefined") {
             const utf8 = enc.encode(str + "\0");
