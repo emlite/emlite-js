@@ -1,6 +1,6 @@
 {
   "name": "emlite",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "description": "A tiny JS bridge for C/C++/Rust/Zig via wasm",
   "main": "src/emlite.js",
   "type": "module",
