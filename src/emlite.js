@@ -3,7 +3,7 @@
 // 1.0.23 => 1000023
 // 11.0.23 => 11000023
 // version = (major × 1 000 000) + (minor × 1 000) + patch
-const EMLITE_VERSION = 1030;
+const EMLITE_VERSION = 1031;
 
 class HandleTable {
   constructor() {
@@ -229,11 +229,42 @@ export class Emlite {
 
       emlite_val_new_array: () => HANDLE_MAP.add([]),
       emlite_val_new_object: () => HANDLE_MAP.add({}),
-      emlite_val_make_int: (n) => HANDLE_MAP.add(n | 0),
+      emlite_val_make_int: (value) => HANDLE_MAP.add(value | 0), // 32-bit signed: -2^31 to 2^31-1
+      emlite_val_make_uint: (value) => HANDLE_MAP.add(value >>> 0), // 32-bit unsigned: 0 to 2^32-1
+      emlite_val_make_bigint: (value) => HANDLE_MAP.add(BigInt(value)), // 64-bit signed BigInt
+      emlite_val_make_biguint: (value) => {
+        let x = BigInt(value); // may be negative due to signed i64 view
+        if (x < 0n) x += 1n << 64n; // normalize to [0, 2^64-1]
+        return HANDLE_MAP.add(x);
+      },
       emlite_val_make_double: (n) => HANDLE_MAP.add(n),
       emlite_val_make_str: (ptr, len) => HANDLE_MAP.add(this.cStr(ptr, len)),
 
-      emlite_val_get_value_int: (n) => HANDLE_MAP.get(n) | 0,
+      emlite_val_get_value_int: (n) => {
+        const val = HANDLE_MAP.get(n);
+        if (typeof val === "bigint") {
+          return Number(val) | 0; // Convert BigInt to 32-bit signed (may truncate)
+        }
+        return val | 0; // 32-bit signed conversion
+      },
+      emlite_val_get_value_uint: (n) => {
+        const val = HANDLE_MAP.get(n);
+        if (typeof val === "bigint") {
+          return Number(val) >>> 0; // Convert BigInt to 32-bit unsigned (may truncate)
+        }
+        return val >>> 0; // 32-bit unsigned conversion
+      },
+      emlite_val_get_value_bigint: (h) => {
+        const v = HANDLE_MAP.get(h);
+        if (typeof v === "bigint") return v; // already BigInt
+        return BigInt(Math.trunc(Number(v))); // coerce number → BigInt
+      },
+      emlite_val_get_value_biguint: (h) => {
+        const v = HANDLE_MAP.get(h);
+        if (typeof v === "bigint") return v >= 0n ? v : 0n; // clamp negative
+        const n = Math.trunc(Number(v));
+        return BigInt(n >= 0 ? n : 0); // clamp to unsigned
+      },
       emlite_val_get_value_double: (n) => Number(HANDLE_MAP.get(n)),
       emlite_val_get_value_string: (n) =>
         this.copyStringToWasm(HANDLE_MAP.get(n)),
