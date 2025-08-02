@@ -229,6 +229,7 @@ export class Emlite {
 
       emlite_val_new_array: () => HANDLE_MAP.add([]),
       emlite_val_new_object: () => HANDLE_MAP.add({}),
+      emlite_val_make_bool:(value) => HANDLE_MAP.add(!!value),
       emlite_val_make_int: (value) => HANDLE_MAP.add(value | 0), // 32-bit signed: -2^31 to 2^31-1
       emlite_val_make_uint: (value) => HANDLE_MAP.add(value >>> 0), // 32-bit unsigned: 0 to 2^32-1
       emlite_val_make_bigint: (value) => HANDLE_MAP.add(BigInt(value)), // 64-bit signed BigInt
@@ -268,6 +269,7 @@ export class Emlite {
       emlite_val_get_value_double: (n) => Number(HANDLE_MAP.get(n)),
       emlite_val_get_value_string: (n) =>
         this.copyStringToWasm(HANDLE_MAP.get(n)),
+      emlite_val_get_value_bool: (h) => (HANDLE_MAP.get(h) ? 1 : 0),
       emlite_val_typeof: (n) => this.copyStringToWasm(typeof HANDLE_MAP.get(n)),
 
       emlite_val_push: (arrRef, valRef) => {
@@ -294,6 +296,10 @@ export class Emlite {
       emlite_val_is_number: (arg) => {
         const obj = HANDLE_MAP.get(arg);
         return typeof obj === "number" || obj instanceof Number;
+      },
+      emlite_val_is_bool: (h) => {
+        const v = HANDLE_MAP.get(h);
+        return ((typeof v === "boolean") || (v instanceof Boolean)) | 0;
       },
       emlite_val_gt: (a, b) => HANDLE_MAP.get(a) > HANDLE_MAP.get(b),
       emlite_val_gte: (a, b) => HANDLE_MAP.get(a) >= HANDLE_MAP.get(b),
