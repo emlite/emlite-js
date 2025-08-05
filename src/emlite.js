@@ -200,6 +200,20 @@ export class Emlite {
   }
 
   /**
+   * Convert a UTF-16 C string to a javascript string
+   * @param {Number} ptr - represents an offset in wasm's memory (char16_t*)
+   * @param {Number} len - represents the length in char16_t units
+   * @returns {string} returns a javascript string
+   */
+  cStrUtf16(ptr, len) {
+    this._ensureViewsFresh();
+    // ptr is in bytes, but we need to access as char16_t (2 bytes each)
+    // Ensure ptr is aligned to 2-byte boundary
+    const startIdx = ptr / 2;
+    return String.fromCharCode(...this._u16.subarray(startIdx, startIdx + len));
+  }
+
+  /**
    * Convert a javascript string to a C string
    * @param {string} str - The javascript string
    * @returns {Number} - represents the offset in memory of a null-terminated char array
@@ -213,6 +227,37 @@ export class Emlite {
       if (ptr === 0) throw new Error("malloc failed in copyStringToWasm");
       // new Uint8Array(this._memory.buffer).set(utf8, ptr);
       this._u8.set(utf8, ptr);
+      return ptr;
+    } else {
+      return 0;
+    }
+  }
+
+  /**
+   * Convert a javascript string to a UTF-16 C string
+   * @param {string} str - The javascript string
+   * @returns {Number} - represents the offset in memory of a null-terminated char16_t array
+   */
+  copyStringToWasmUtf16(str) {
+    if (!str || !(typeof str === "string" || str instanceof String)) return 0;
+    this._ensureViewsFresh();
+    if (typeof this.exports.emlite_malloc !== "undefined") {
+      // Each char16_t is 2 bytes, +1 for null terminator
+      const byteLength = (str.length + 1) * 2;
+      const ptr = this.exports.emlite_malloc(byteLength);
+      if (ptr === 0) throw new Error("malloc failed in copyStringToWasmUtf16");
+      
+      // Ensure 2-byte alignment
+      if (ptr % 2 !== 0) throw new Error("UTF-16 string not properly aligned");
+      
+      const startIdx = ptr / 2;
+      // Copy string characters
+      for (let i = 0; i < str.length; i++) {
+        this._u16[startIdx + i] = str.charCodeAt(i);
+      }
+      // Add null terminator
+      this._u16[startIdx + str.length] = 0;
+      
       return ptr;
     } else {
       return 0;
@@ -240,6 +285,7 @@ export class Emlite {
       },
       emlite_val_make_double: (n) => HANDLE_MAP.add(n),
       emlite_val_make_str: (ptr, len) => HANDLE_MAP.add(this.cStr(ptr, len)),
+      emlite_val_make_str_utf16: (ptr, len) => HANDLE_MAP.add(this.cStrUtf16(ptr, len)),
 
       emlite_val_get_value_int: (n) => {
         const val = HANDLE_MAP.get(n);
@@ -269,6 +315,8 @@ export class Emlite {
       emlite_val_get_value_double: (n) => Number(HANDLE_MAP.get(n)),
       emlite_val_get_value_string: (n) =>
         this.copyStringToWasm(HANDLE_MAP.get(n)),
+      emlite_val_get_value_string_utf16: (n) =>
+        this.copyStringToWasmUtf16(HANDLE_MAP.get(n)),
       emlite_val_get_value_bool: (h) => (HANDLE_MAP.get(h) ? 1 : 0),
       emlite_val_typeof: (n) => this.copyStringToWasm(typeof HANDLE_MAP.get(n)),
 
