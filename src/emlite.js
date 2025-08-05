@@ -1,9 +1,10 @@
+/* eslint-disable no-undef */
 // base-1000 encoding of major.minor.patch of the semver string
 // 0.1.23 => 1023
 // 1.0.23 => 1000023
 // 11.0.23 => 11000023
 // version = (major × 1 000 000) + (minor × 1 000) + patch
-const EMLITE_VERSION = 1031;
+const EMLITE_VERSION = 1032;
 
 const enc = new TextEncoder("utf-8");
 const dec = new TextDecoder("utf-8");
@@ -34,6 +35,7 @@ export class Emlite {
   }
 
   envIsBrowser() {
+    // eslint-disable-next-line no-undef
     return typeof window !== "undefined" && "document" in window;
   }
 
@@ -49,7 +51,7 @@ export class Emlite {
    */
   async readFile(url) {
     if (this.envIsBrowser()) {
-      let buf = await window.fetch(url);
+      let buf = await fetch(url);
       return await buf.arrayBuffer();
     } else {
       const { readFile } = await this.dynamicImport("node:fs/promises");
@@ -248,15 +250,15 @@ export class Emlite {
           }
         }
 
-        const HANDLE_MAP = new HandleTable();
-        HANDLE_MAP.add(null);
-        HANDLE_MAP.add(undefined);
-        HANDLE_MAP.add(false);
-        HANDLE_MAP.add(true);
-        HANDLE_MAP.add(globalThis);
-        HANDLE_MAP.add(console);
-        HANDLE_MAP.add(Symbol("_EMLITE_RESERVED_"));
-        globalThis.EMLITE_VALMAP = HANDLE_MAP;
+        const EMLITE_VALMAP = new HandleTable();
+        EMLITE_VALMAP.add(null);
+        EMLITE_VALMAP.add(undefined);
+        EMLITE_VALMAP.add(false);
+        EMLITE_VALMAP.add(true);
+        EMLITE_VALMAP.add(globalThis);
+        EMLITE_VALMAP.add(console);
+        EMLITE_VALMAP.add(Symbol("_EMLITE_RESERVED_"));
+        globalThis.EMLITE_VALMAP = EMLITE_VALMAP;
 
         function normalizeThrown(e) {
           if (e instanceof Error) return e;
@@ -275,109 +277,109 @@ export class Emlite {
         globalThis.normalizeThrown = normalizeThrown;
       },
 
-      emlite_val_new_array: () => HANDLE_MAP.add([]),
-      emlite_val_new_object: () => HANDLE_MAP.add({}),
-      emlite_val_make_bool: (value) => HANDLE_MAP.add(!!value),
-      emlite_val_make_int: (value) => HANDLE_MAP.add(value | 0), // 32-bit signed: -2^31 to 2^31-1
-      emlite_val_make_uint: (value) => HANDLE_MAP.add(value >>> 0), // 32-bit unsigned: 0 to 2^32-1
-      emlite_val_make_bigint: (value) => HANDLE_MAP.add(BigInt(value)), // 64-bit signed BigInt
+      emlite_val_new_array: () => EMLITE_VALMAP.add([]),
+      emlite_val_new_object: () => EMLITE_VALMAP.add({}),
+      emlite_val_make_bool: (value) => EMLITE_VALMAP.add(!!value),
+      emlite_val_make_int: (value) => EMLITE_VALMAP.add(value | 0), // 32-bit signed: -2^31 to 2^31-1
+      emlite_val_make_uint: (value) => EMLITE_VALMAP.add(value >>> 0), // 32-bit unsigned: 0 to 2^32-1
+      emlite_val_make_bigint: (value) => EMLITE_VALMAP.add(BigInt(value)), // 64-bit signed BigInt
       emlite_val_make_biguint: (value) => {
         let x = BigInt(value); // may be negative due to signed i64 view
         if (x < 0n) x += 1n << 64n; // normalize to [0, 2^64-1]
-        return HANDLE_MAP.add(x);
+        return EMLITE_VALMAP.add(x);
       },
-      emlite_val_make_double: (n) => HANDLE_MAP.add(n),
-      emlite_val_make_str: (ptr, len) => HANDLE_MAP.add(this.cStr(ptr, len)),
+      emlite_val_make_double: (n) => EMLITE_VALMAP.add(n),
+      emlite_val_make_str: (ptr, len) => EMLITE_VALMAP.add(this.cStr(ptr, len)),
       emlite_val_make_str_utf16: (ptr, len) =>
-        HANDLE_MAP.add(this.cStrUtf16(ptr, len)),
+        EMLITE_VALMAP.add(this.cStrUtf16(ptr, len)),
 
       emlite_val_get_value_int: (n) => {
-        const val = HANDLE_MAP.get(n);
+        const val = EMLITE_VALMAP.get(n);
         if (typeof val === "bigint") {
           return Number(val) | 0; // Convert BigInt to 32-bit signed (may truncate)
         }
         return val | 0; // 32-bit signed conversion
       },
       emlite_val_get_value_uint: (n) => {
-        const val = HANDLE_MAP.get(n);
+        const val = EMLITE_VALMAP.get(n);
         if (typeof val === "bigint") {
           return Number(val) >>> 0; // Convert BigInt to 32-bit unsigned (may truncate)
         }
         return val >>> 0; // 32-bit unsigned conversion
       },
       emlite_val_get_value_bigint: (h) => {
-        const v = HANDLE_MAP.get(h);
+        const v = EMLITE_VALMAP.get(h);
         if (typeof v === "bigint") return v; // already BigInt
         return BigInt(Math.trunc(Number(v))); // coerce number → BigInt
       },
       emlite_val_get_value_biguint: (h) => {
-        const v = HANDLE_MAP.get(h);
+        const v = EMLITE_VALMAP.get(h);
         if (typeof v === "bigint") return v >= 0n ? v : 0n; // clamp negative
         const n = Math.trunc(Number(v));
         return BigInt(n >= 0 ? n : 0); // clamp to unsigned
       },
-      emlite_val_get_value_double: (n) => Number(HANDLE_MAP.get(n)),
+      emlite_val_get_value_double: (n) => Number(EMLITE_VALMAP.get(n)),
       emlite_val_get_value_string: (n) =>
-        this.copyStringToWasm(HANDLE_MAP.get(n)),
+        this.copyStringToWasm(EMLITE_VALMAP.get(n)),
       emlite_val_get_value_string_utf16: (n) =>
-        this.copyStringToWasmUtf16(HANDLE_MAP.get(n)),
-      emlite_val_get_value_bool: (h) => (HANDLE_MAP.get(h) ? 1 : 0),
-      emlite_val_typeof: (n) => this.copyStringToWasm(typeof HANDLE_MAP.get(n)),
+        this.copyStringToWasmUtf16(EMLITE_VALMAP.get(n)),
+      emlite_val_get_value_bool: (h) => (EMLITE_VALMAP.get(h) ? 1 : 0),
+      emlite_val_typeof: (n) => this.copyStringToWasm(typeof EMLITE_VALMAP.get(n)),
 
       emlite_val_push: (arrRef, valRef) => {
         try {
-          HANDLE_MAP.get(arrRef).push(valRef);
-        } catch {}
+          EMLITE_VALMAP.get(arrRef).push(valRef);
+        } catch { /* empty */ }
       },
       emlite_val_get: (n, idx) =>
-        HANDLE_MAP.add(HANDLE_MAP.get(n)[HANDLE_MAP.get(idx)]),
+        EMLITE_VALMAP.add(EMLITE_VALMAP.get(n)[EMLITE_VALMAP.get(idx)]),
       emlite_val_set: (n, idx, valRef) =>
-        (HANDLE_MAP.get(n)[HANDLE_MAP.get(idx)] = HANDLE_MAP.get(valRef)),
+        (EMLITE_VALMAP.get(n)[EMLITE_VALMAP.get(idx)] = EMLITE_VALMAP.get(valRef)),
       emlite_val_has: (objRef, valRef) => {
         try {
-          return Reflect.has(HANDLE_MAP.get(objRef), HANDLE_MAP.get(valRef));
+          return Reflect.has(EMLITE_VALMAP.get(objRef), EMLITE_VALMAP.get(valRef));
         } catch {
           return false;
         }
       },
-      emlite_val_not: (arg) => !HANDLE_MAP.get(arg),
+      emlite_val_not: (arg) => !EMLITE_VALMAP.get(arg),
       emlite_val_is_string: (arg) => {
-        const obj = HANDLE_MAP.get(arg);
+        const obj = EMLITE_VALMAP.get(arg);
         return typeof obj === "string" || obj instanceof String;
       },
       emlite_val_is_number: (arg) => {
-        const obj = HANDLE_MAP.get(arg);
+        const obj = EMLITE_VALMAP.get(arg);
         return typeof obj === "number" || obj instanceof Number;
       },
       emlite_val_is_bool: (h) => {
-        const v = HANDLE_MAP.get(h);
+        const v = EMLITE_VALMAP.get(h);
         return (typeof v === "boolean" || v instanceof Boolean) | 0;
       },
-      emlite_val_gt: (a, b) => HANDLE_MAP.get(a) > HANDLE_MAP.get(b),
-      emlite_val_gte: (a, b) => HANDLE_MAP.get(a) >= HANDLE_MAP.get(b),
-      emlite_val_lt: (a, b) => HANDLE_MAP.get(a) < HANDLE_MAP.get(b),
-      emlite_val_lte: (a, b) => HANDLE_MAP.get(a) <= HANDLE_MAP.get(b),
-      emlite_val_equals: (a, b) => HANDLE_MAP.get(a) == HANDLE_MAP.get(b),
+      emlite_val_gt: (a, b) => EMLITE_VALMAP.get(a) > EMLITE_VALMAP.get(b),
+      emlite_val_gte: (a, b) => EMLITE_VALMAP.get(a) >= EMLITE_VALMAP.get(b),
+      emlite_val_lt: (a, b) => EMLITE_VALMAP.get(a) < EMLITE_VALMAP.get(b),
+      emlite_val_lte: (a, b) => EMLITE_VALMAP.get(a) <= EMLITE_VALMAP.get(b),
+      emlite_val_equals: (a, b) => EMLITE_VALMAP.get(a) == EMLITE_VALMAP.get(b),
       emlite_val_strictly_equals: (a, b) =>
-        HANDLE_MAP.get(a) === HANDLE_MAP.get(b),
+        EMLITE_VALMAP.get(a) === EMLITE_VALMAP.get(b),
       emlite_val_instanceof: (a, b) =>
-        HANDLE_MAP.get(a) instanceof HANDLE_MAP.get(b),
+        EMLITE_VALMAP.get(a) instanceof EMLITE_VALMAP.get(b),
       emlite_val_obj_has_own_prop: (objRef, pPtr, pLen) => {
-        const target = HANDLE_MAP.get(objRef);
+        const target = EMLITE_VALMAP.get(objRef);
         const prop = this.cStr(pPtr, pLen);
         return Object.prototype.hasOwnProperty.call(target, prop);
       },
-      emlite_val_inc_ref: (h) => HANDLE_MAP.incRef(h),
+      emlite_val_inc_ref: (h) => EMLITE_VALMAP.incRef(h),
       emlite_val_dec_ref: (h) => {
-        if (h > 6) HANDLE_MAP.decRef(h);
+        if (h > 6) EMLITE_VALMAP.decRef(h);
       },
       emlite_val_throw: (n) => {
-        throw HANDLE_MAP.get(n);
+        throw EMLITE_VALMAP.get(n);
       },
 
       emlite_val_make_callback: (fidx, data) => {
         const jsFn = (...args) => {
-          const arrHandle = HANDLE_MAP.add(args.map((v) => v));
+          const arrHandle = EMLITE_VALMAP.add(args.map((v) => v));
           let ret;
           try {
             ret = this.exports.__indirect_function_table.get(fidx)(
@@ -389,54 +391,54 @@ export class Emlite {
           }
           return ret;
         };
-        return HANDLE_MAP.add(jsFn);
+        return EMLITE_VALMAP.add(jsFn);
       },
 
       emlite_val_obj_call: (objRef, mPtr, mLen, argvRef) => {
-        const target = HANDLE_MAP.get(objRef);
+        const target = EMLITE_VALMAP.get(objRef);
         const method = this.cStr(mPtr, mLen);
-        const args = HANDLE_MAP.get(argvRef).map((h) => HANDLE_MAP.get(h));
+        const args = EMLITE_VALMAP.get(argvRef).map((h) => EMLITE_VALMAP.get(h));
         let ret;
         try {
           ret = Reflect.apply(target[method], target, args);
         } catch (e) {
           ret = normalizeThrown(e);
         }
-        return HANDLE_MAP.add(ret);
+        return EMLITE_VALMAP.add(ret);
       },
       emlite_val_construct_new: (objRef, argvRef) => {
-        const target = HANDLE_MAP.get(objRef);
-        const args = HANDLE_MAP.get(argvRef).map((h) => HANDLE_MAP.get(h));
+        const target = EMLITE_VALMAP.get(objRef);
+        const args = EMLITE_VALMAP.get(argvRef).map((h) => EMLITE_VALMAP.get(h));
         let ret;
         try {
           ret = Reflect.construct(target, args);
         } catch (e) {
           ret = normalizeThrown(e);
         }
-        return HANDLE_MAP.add(ret);
+        return EMLITE_VALMAP.add(ret);
       },
       emlite_val_func_call: (objRef, argvRef) => {
-        const target = HANDLE_MAP.get(objRef);
-        const args = HANDLE_MAP.get(argvRef).map((h) => HANDLE_MAP.get(h));
+        const target = EMLITE_VALMAP.get(objRef);
+        const args = EMLITE_VALMAP.get(argvRef).map((h) => EMLITE_VALMAP.get(h));
         let ret;
         try {
           ret = Reflect.apply(target, undefined, args);
         } catch (e) {
           ret = normalizeThrown(e);
         }
-        return HANDLE_MAP.add(ret);
+        return EMLITE_VALMAP.add(ret);
       },
       // eslint-disable-next-line no-unused-vars
       emscripten_notify_memory_growth: (i) => this._updateViews(),
       _msync_js: () => {},
-      emlite_print_object_map: () => console.log(HANDLE_MAP),
+      emlite_print_object_map: () => console.log(EMLITE_VALMAP),
       emlite_reset_object_map: () => {
-        for (const h of [...HANDLE_MAP._h2e.keys()]) {
+        for (const h of [...EMLITE_VALMAP._h2e.keys()]) {
           if (h > 6) {
-            const value = HANDLE_MAP._h2e.get(h).value;
+            const value = EMLITE_VALMAP._h2e.get(h).value;
 
-            HANDLE_MAP._h2e.delete(h);
-            HANDLE_MAP._v2h.delete(value);
+            EMLITE_VALMAP._h2e.delete(h);
+            EMLITE_VALMAP._v2h.delete(value);
           }
         }
       },
