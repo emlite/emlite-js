@@ -5,90 +5,6 @@
 // version = (major × 1 000 000) + (minor × 1 000) + patch
 const EMLITE_VERSION = 1031;
 
-class HandleTable {
-  constructor() {
-    this._h2e = new Map();
-    this._v2h = new Map();
-    this._next = 0;
-  }
-
-  _newEntry(value) {
-    const h = this._next++;
-    this._h2e.set(h, { value, refs: 1 });
-    this._v2h.set(value, h);
-    return h;
-  }
-
-  add(value) {
-    if (this._v2h.has(value)) {
-      const h = this._v2h.get(value);
-      ++this._h2e.get(h).refs;
-      return h;
-    }
-    return this._newEntry(value);
-  }
-
-  decRef(h) {
-    const e = this._h2e.get(h);
-    if (!e) return false;
-
-    if (--e.refs === 0) {
-      this._h2e.delete(h);
-      this._v2h.delete(e.value);
-    }
-    return true;
-  }
-
-  incRef(h) {
-    const e = this._h2e.get(h);
-    if (e) ++e.refs;
-  }
-
-  get(h) {
-    return this._h2e.get(h)?.value;
-  }
-  toHandle(value) {
-    return this.add(value);
-  }
-  toValue(h) {
-    return this.get(h);
-  }
-  has(value) {
-    return this._v2h.has(value);
-  }
-  get size() {
-    return this._h2e.size;
-  }
-  [Symbol.iterator]() {
-    return this._h2e.values();
-  }
-}
-
-const HANDLE_MAP = new HandleTable();
-HANDLE_MAP.add(null);
-HANDLE_MAP.add(undefined);
-HANDLE_MAP.add(false);
-HANDLE_MAP.add(true);
-HANDLE_MAP.add(globalThis);
-HANDLE_MAP.add(console);
-HANDLE_MAP.add(Symbol("_EMLITE_RESERVED_"));
-globalThis.EMLITE_VALMAP = HANDLE_MAP;
-
-function normalizeThrown(e) {
-  if (e instanceof Error) return e;
-  try {
-    const err = new Error(String(e));
-    if (e && typeof e === "object") {
-      if ("name" in e) err.name = e.name;
-      if ("code" in e) err.code = e.code;
-    }
-    err.cause = e;
-    return err;
-  } catch {
-    return new Error("Unknown JS exception");
-  }
-}
-
 const enc = new TextEncoder("utf-8");
 const dec = new TextDecoder("utf-8");
 
@@ -246,10 +162,10 @@ export class Emlite {
       const byteLength = (str.length + 1) * 2;
       const ptr = this.exports.emlite_malloc(byteLength);
       if (ptr === 0) throw new Error("malloc failed in copyStringToWasmUtf16");
-      
+
       // Ensure 2-byte alignment
       if (ptr % 2 !== 0) throw new Error("UTF-16 string not properly aligned");
-      
+
       const startIdx = ptr / 2;
       // Copy string characters
       for (let i = 0; i < str.length; i++) {
@@ -257,7 +173,7 @@ export class Emlite {
       }
       // Add null terminator
       this._u16[startIdx + str.length] = 0;
-      
+
       return ptr;
     } else {
       return 0;
@@ -272,9 +188,96 @@ export class Emlite {
       __cxa_throw: () => {},
       __cxa_atexit: () => {},
 
+      emlite_init_handle_table: () => {
+        class HandleTable {
+          constructor() {
+            this._h2e = new Map();
+            this._v2h = new Map();
+            this._next = 0;
+          }
+
+          _newEntry(value) {
+            const h = this._next++;
+            this._h2e.set(h, { value, refs: 1 });
+            this._v2h.set(value, h);
+            return h;
+          }
+
+          add(value) {
+            if (this._v2h.has(value)) {
+              const h = this._v2h.get(value);
+              ++this._h2e.get(h).refs;
+              return h;
+            }
+            return this._newEntry(value);
+          }
+
+          decRef(h) {
+            const e = this._h2e.get(h);
+            if (!e) return false;
+
+            if (--e.refs === 0) {
+              this._h2e.delete(h);
+              this._v2h.delete(e.value);
+            }
+            return true;
+          }
+
+          incRef(h) {
+            const e = this._h2e.get(h);
+            if (e) ++e.refs;
+          }
+
+          get(h) {
+            return this._h2e.get(h)?.value;
+          }
+          toHandle(value) {
+            return this.add(value);
+          }
+          toValue(h) {
+            return this.get(h);
+          }
+          has(value) {
+            return this._v2h.has(value);
+          }
+          get size() {
+            return this._h2e.size;
+          }
+          [Symbol.iterator]() {
+            return this._h2e.values();
+          }
+        }
+
+        const HANDLE_MAP = new HandleTable();
+        HANDLE_MAP.add(null);
+        HANDLE_MAP.add(undefined);
+        HANDLE_MAP.add(false);
+        HANDLE_MAP.add(true);
+        HANDLE_MAP.add(globalThis);
+        HANDLE_MAP.add(console);
+        HANDLE_MAP.add(Symbol("_EMLITE_RESERVED_"));
+        globalThis.EMLITE_VALMAP = HANDLE_MAP;
+
+        function normalizeThrown(e) {
+          if (e instanceof Error) return e;
+          try {
+            const err = new Error(String(e));
+            if (e && typeof e === "object") {
+              if ("name" in e) err.name = e.name;
+              if ("code" in e) err.code = e.code;
+            }
+            err.cause = e;
+            return err;
+          } catch {
+            return new Error("Unknown JS exception");
+          }
+        }
+        globalThis.normalizeThrown = normalizeThrown;
+      },
+
       emlite_val_new_array: () => HANDLE_MAP.add([]),
       emlite_val_new_object: () => HANDLE_MAP.add({}),
-      emlite_val_make_bool:(value) => HANDLE_MAP.add(!!value),
+      emlite_val_make_bool: (value) => HANDLE_MAP.add(!!value),
       emlite_val_make_int: (value) => HANDLE_MAP.add(value | 0), // 32-bit signed: -2^31 to 2^31-1
       emlite_val_make_uint: (value) => HANDLE_MAP.add(value >>> 0), // 32-bit unsigned: 0 to 2^32-1
       emlite_val_make_bigint: (value) => HANDLE_MAP.add(BigInt(value)), // 64-bit signed BigInt
@@ -285,7 +288,8 @@ export class Emlite {
       },
       emlite_val_make_double: (n) => HANDLE_MAP.add(n),
       emlite_val_make_str: (ptr, len) => HANDLE_MAP.add(this.cStr(ptr, len)),
-      emlite_val_make_str_utf16: (ptr, len) => HANDLE_MAP.add(this.cStrUtf16(ptr, len)),
+      emlite_val_make_str_utf16: (ptr, len) =>
+        HANDLE_MAP.add(this.cStrUtf16(ptr, len)),
 
       emlite_val_get_value_int: (n) => {
         const val = HANDLE_MAP.get(n);
@@ -347,7 +351,7 @@ export class Emlite {
       },
       emlite_val_is_bool: (h) => {
         const v = HANDLE_MAP.get(h);
-        return ((typeof v === "boolean") || (v instanceof Boolean)) | 0;
+        return (typeof v === "boolean" || v instanceof Boolean) | 0;
       },
       emlite_val_gt: (a, b) => HANDLE_MAP.get(a) > HANDLE_MAP.get(b),
       emlite_val_gte: (a, b) => HANDLE_MAP.get(a) >= HANDLE_MAP.get(b),
