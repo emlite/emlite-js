@@ -8,6 +8,7 @@ const EMLITE_VERSION = 1032;
 
 const enc = new TextEncoder("utf-8");
 const dec = new TextDecoder("utf-8");
+const dec_16 = new TextDecoder("utf-16le");
 
 export class Emlite {
   /**
@@ -125,10 +126,7 @@ export class Emlite {
    */
   cStrUtf16(ptr, len) {
     this._ensureViewsFresh();
-    // ptr is in bytes, but we need to access as char16_t (2 bytes each)
-    // Ensure ptr is aligned to 2-byte boundary
-    const startIdx = ptr / 2;
-    return String.fromCharCode(...this._u16.subarray(startIdx, startIdx + len));
+    return dec_16.decode(this._u8.subarray(ptr, ptr + len * 2));
   }
 
   /**
@@ -168,7 +166,7 @@ export class Emlite {
       // Ensure 2-byte alignment
       if (ptr % 2 !== 0) throw new Error("UTF-16 string not properly aligned");
 
-      const startIdx = ptr / 2;
+      const startIdx = ptr >>> 1;
       // Copy string characters
       for (let i = 0; i < str.length; i++) {
         this._u16[startIdx + i] = str.charCodeAt(i);
@@ -324,20 +322,27 @@ export class Emlite {
       emlite_val_get_value_string_utf16: (n) =>
         this.copyStringToWasmUtf16(EMLITE_VALMAP.get(n)),
       emlite_val_get_value_bool: (h) => (EMLITE_VALMAP.get(h) ? 1 : 0),
-      emlite_val_typeof: (n) => this.copyStringToWasm(typeof EMLITE_VALMAP.get(n)),
+      emlite_val_typeof: (n) =>
+        this.copyStringToWasm(typeof EMLITE_VALMAP.get(n)),
 
       emlite_val_push: (arrRef, valRef) => {
         try {
           EMLITE_VALMAP.get(arrRef).push(valRef);
-        } catch { /* empty */ }
+        } catch {
+          /* empty */
+        }
       },
       emlite_val_get: (n, idx) =>
         EMLITE_VALMAP.add(EMLITE_VALMAP.get(n)[EMLITE_VALMAP.get(idx)]),
       emlite_val_set: (n, idx, valRef) =>
-        (EMLITE_VALMAP.get(n)[EMLITE_VALMAP.get(idx)] = EMLITE_VALMAP.get(valRef)),
+        (EMLITE_VALMAP.get(n)[EMLITE_VALMAP.get(idx)] =
+          EMLITE_VALMAP.get(valRef)),
       emlite_val_has: (objRef, valRef) => {
         try {
-          return Reflect.has(EMLITE_VALMAP.get(objRef), EMLITE_VALMAP.get(valRef));
+          return Reflect.has(
+            EMLITE_VALMAP.get(objRef),
+            EMLITE_VALMAP.get(valRef)
+          );
         } catch {
           return false;
         }
@@ -397,7 +402,9 @@ export class Emlite {
       emlite_val_obj_call: (objRef, mPtr, mLen, argvRef) => {
         const target = EMLITE_VALMAP.get(objRef);
         const method = this.cStr(mPtr, mLen);
-        const args = EMLITE_VALMAP.get(argvRef).map((h) => EMLITE_VALMAP.get(h));
+        const args = EMLITE_VALMAP.get(argvRef).map((h) =>
+          EMLITE_VALMAP.get(h)
+        );
         let ret;
         try {
           ret = Reflect.apply(target[method], target, args);
@@ -408,7 +415,9 @@ export class Emlite {
       },
       emlite_val_construct_new: (objRef, argvRef) => {
         const target = EMLITE_VALMAP.get(objRef);
-        const args = EMLITE_VALMAP.get(argvRef).map((h) => EMLITE_VALMAP.get(h));
+        const args = EMLITE_VALMAP.get(argvRef).map((h) =>
+          EMLITE_VALMAP.get(h)
+        );
         let ret;
         try {
           ret = Reflect.construct(target, args);
@@ -419,7 +428,9 @@ export class Emlite {
       },
       emlite_val_func_call: (objRef, argvRef) => {
         const target = EMLITE_VALMAP.get(objRef);
-        const args = EMLITE_VALMAP.get(argvRef).map((h) => EMLITE_VALMAP.get(h));
+        const args = EMLITE_VALMAP.get(argvRef).map((h) =>
+          EMLITE_VALMAP.get(h)
+        );
         let ret;
         try {
           ret = Reflect.apply(target, undefined, args);
