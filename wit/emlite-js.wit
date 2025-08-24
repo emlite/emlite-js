@@ -1,0 +1,65 @@
+package emlite:env@0.1.0;
+
+interface host {
+  emlite-init-handle-table: func();
+
+  emlite-val-new-array: func() -> u32;
+  emlite-val-new-object: func() -> u32;
+  emlite-val-make-bool: func(v: bool) -> u32;
+  emlite-val-make-int: func(v: s32) -> u32;
+  emlite-val-make-uint: func(v: u32) -> u32;
+  emlite-val-make-bigint: func(v: s64) -> u32;
+  emlite-val-make-biguint: func(v: u64) -> u32;
+  emlite-val-make-double: func(v: f64) -> u32;
+  emlite-val-make-str: func(s: string) -> u32;
+  emlite-val-make-str-utf16: func(s: list<u16>) -> u32;
+
+  emlite-val-get-value-bool: func(h: u32) -> bool;
+  emlite-val-get-value-int: func(h: u32) -> s32;
+  emlite-val-get-value-uint: func(h: u32) -> u32;
+  emlite-val-get-value-bigint: func(h: u32) -> s64;
+  emlite-val-get-value-biguint: func(h: u32) -> u64;
+  emlite-val-get-value-double: func(h: u32) -> f64;
+  emlite-val-get-value-string: func(h: u32) -> string;
+  emlite-val-get-value-string-utf16: func(h: u32) -> list<u16>;
+  emlite-val-typeof: func(h: u32) -> string;
+
+  emlite-val-push: func(arr: u32, val: u32);
+  emlite-val-get: func(obj: u32, idx: u32) -> u32;
+  emlite-val-set: func(obj: u32, idx: u32, val: u32);
+  emlite-val-has: func(obj: u32, key: u32) -> bool;
+  emlite-val-not: func(h: u32) -> bool;
+  emlite-val-is-string: func(h: u32) -> bool;
+  emlite-val-is-number: func(h: u32) -> bool;
+  emlite-val-is-bool: func(h: u32) -> bool;
+  emlite-val-gt: func(a: u32, b: u32) -> bool;
+  emlite-val-gte: func(a: u32, b: u32) -> bool;
+  emlite-val-lt: func(a: u32, b: u32) -> bool;
+  emlite-val-lte: func(a: u32, b: u32) -> bool;
+  emlite-val-equals: func(a: u32, b: u32) -> bool;
+  emlite-val-strictly-equals: func(a: u32, b: u32) -> bool;
+  emlite-val-instanceof: func(a: u32, b: u32) -> bool;
+
+  emlite-val-obj-call: func(obj: u32, method: string, argv: u32) -> u32;
+  emlite-val-obj-has-own-prop: func(obj: u32, prop: string) -> bool;
+
+  emlite-val-construct-new: func(ctor: u32, argv: u32) -> u32;
+  emlite-val-func-call: func(fn: u32, argv: u32) -> u32;
+
+  emlite-val-inc-ref: func(h: u32);
+  emlite-val-dec-ref: func(h: u32);
+  emlite-val-throw: func(h: u32);
+  emlite-print-object-map: func();
+  emlite-reset-object-map: func();
+
+  emlite-val-make-callback: func(fidx: u32, data: u32) -> u32;
+}
+
+interface dyncall {
+  apply: func(fidx: u32, argv: u32, data: u32) -> u32;
+}
+
+world env {
+  export host;
+  import dyncall;
+}
