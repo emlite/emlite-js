@@ -1,231 +1,281 @@
-import { Emlite } from "./emlite.js";
-import { apply } from "emlite:env/dyncall@0.1.0";
+let V = null;
 
-let em;
-let inited = false;
+export function makeHost({ apply }) {
+  const strToU16 = (s) => {
+    const out = new Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  };
+  const u16ToStr = (a) => {
+    let s = "";
+    for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i] & 0xffff);
+    return s;
+  };
 
-function env() {
-  if (!em) em = new Emlite();
-  const e = em.env;
-  if (!inited) {
-    e.emlite_init_handle_table();
-    inited = true;
-  }
-  return e;
-}
-const VAL = () => globalThis.EMLITE_VALMAP;
-const norm = (e) => (globalThis.normalizeThrown ? normalizeThrown(e) : e);
-
-function stringToU16Array(s) {
-  const out = new Array(s.length);
-  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
-  return out;
-}
-function u16ArrayToString(arr) {
-  let s = "";
-  for (let i = 0; i < arr.length; i++)
-    s += String.fromCharCode(arr[i] & 0xffff);
-  return s;
-}
-
-export function makeHost() {
-  const e = () => env();
-
-  return {
-    __cxaAllocateException() {
-      return e().__cxa_allocate_exception();
-    },
-    __cxaFreeException() {
-      return e().__cxa_free_exception();
-    },
-    __cxaThrow() {
-      return e().__cxa_throw();
-    },
-    __cxaAtexit() {
-      return e().__cxa_atexit();
-    },
-
+  const host = {
     emliteInitHandleTable() {
-      return e().emlite_init_handle_table();
+      class HandleTable {
+        constructor() {
+          this.h2e = new Map();
+          this.v2h = new Map();
+          this.next = 0;
+        }
+        _new(v) {
+          const h = this.next++;
+          this.h2e.set(h, { v, refs: 1 });
+          this.v2h.set(v, h);
+          return h;
+        }
+        add(v) {
+          if (this.v2h.has(v)) {
+            const h = this.v2h.get(v);
+            this.h2e.get(h).refs++;
+            return h;
+          }
+          return this._new(v);
+        }
+        get(h) {
+          return this.h2e.get(h)?.v;
+        }
+        incRef(h) {
+          const e = this.h2e.get(h);
+          if (e) e.refs++;
+        }
+        decRef(h) {
+          const e = this.h2e.get(h);
+          if (!e) return;
+          if (--e.refs === 0) {
+            this.v2h.delete(e.v);
+            this.h2e.delete(h);
+          }
+        }
+      }
+      const g = typeof self !== "undefined" ? self : globalThis;
+      const T = new HandleTable();
+      T.add(null); // 0
+      T.add(undefined); // 1
+      T.add(false); // 2
+      T.add(true); // 3
+      T.add(g); // 4  <- global object (has document in page)
+      T.add(console); // 5
+      T.add(Symbol("_EMLITE_RSVD")); // 6
+      globalThis.EMLITE_VALMAP = T;
+      globalThis.normalizeThrown = (e) =>
+        e instanceof Error ? e : new Error(String(e));
+      V = T;
     },
+
     emliteValNewArray() {
-      return e().emlite_val_new_array();
+      return V.add([]);
     },
     emliteValNewObject() {
-      return e().emlite_val_new_object();
+      return V.add({});
     },
     emliteValMakeBool(v) {
-      return e().emlite_val_make_bool(v);
+      return V.add(!!v);
     },
     emliteValMakeInt(v) {
-      return e().emlite_val_make_int(v);
+      return V.add(v | 0);
     },
     emliteValMakeUint(v) {
-      return e().emlite_val_make_uint(v);
+      return V.add(v >>> 0);
     },
     emliteValMakeBigint(v) {
-      return e().emlite_val_make_bigint(v);
+      return V.add(BigInt(v));
     },
     emliteValMakeBiguint(v) {
-      return e().emlite_val_make_biguint(v);
+      let x = BigInt(v);
+      if (x < 0n) x += 1n << 64n;
+      return V.add(x);
     },
     emliteValMakeDouble(n) {
-      return e().emlite_val_make_double(n);
+      return V.add(Number(n));
+    },
+    emliteValMakeStr(s) {
+      return V.add(String(s));
+    },
+    emliteValMakeStrUtf16(u16) {
+      return V.add(u16ToStr(u16));
     },
 
+    emliteValGetValueBool(h) {
+      return !!V.get(h);
+    },
     emliteValGetValueInt(h) {
-      return e().emlite_val_get_value_int(h);
+      const v = V.get(h);
+      return (typeof v === "bigint" ? Number(v) : Number(v)) | 0;
     },
     emliteValGetValueUint(h) {
-      return e().emlite_val_get_value_uint(h);
+      const v = V.get(h);
+      return (typeof v === "bigint" ? Number(v) : Number(v)) >>> 0;
     },
     emliteValGetValueBigint(h) {
-      return e().emlite_val_get_value_bigint(h);
+      const v = V.get(h);
+      return typeof v === "bigint" ? v : BigInt(Math.trunc(Number(v)));
     },
     emliteValGetValueBiguint(h) {
-      return e().emlite_val_get_value_biguint(h);
+      const v = V.get(h);
+      if (typeof v === "bigint") return v >= 0n ? v : 0n;
+      const n = Math.trunc(Number(v));
+      return BigInt(n >= 0 ? n : 0);
     },
     emliteValGetValueDouble(h) {
-      return e().emlite_val_get_value_double(h);
+      return Number(V.get(h));
     },
-    emliteValGetValueBool(h) {
-      return e().emlite_val_get_value_bool(h);
+    emliteValGetValueString(h) {
+      return String(V.get(h));
+    },
+    emliteValGetValueStringUtf16(h) {
+      return strToU16(String(V.get(h)));
     },
     emliteValTypeof(h) {
-      return typeof VAL().get(h);
+      return typeof V.get(h);
     },
 
-    emliteValPush(a, v) {
-      return e().emlite_val_push(a, v);
+    emliteValPush(arr, v) {
+      const a = V.get(arr);
+      if (Array.isArray(a)) a.push(v);
     },
-    emliteValGet(n, idx) {
-      return e().emlite_val_get(n, idx);
+    emliteValGet(obj, idx) {
+      const base = V.get(obj);
+      const key = V.get(idx);
+      return V.add(base != null ? base[key] : undefined);
     },
-    emliteValSet(n, idx, v) {
-      return e().emlite_val_set(n, idx, v);
+    emliteValSet(obj, idx, v) {
+      const base = V.get(obj);
+      if (base == null) return;
+      base[V.get(idx)] = V.get(v);
     },
-    emliteValHas(o, k) {
-      return e().emlite_val_has(o, k);
+    emliteValHas(obj, key) {
+      try {
+        return Reflect.has(V.get(obj), V.get(key));
+      } catch {
+        return false;
+      }
     },
     emliteValNot(h) {
-      return e().emlite_val_not(h);
+      return !V.get(h);
     },
     emliteValIsString(h) {
-      return e().emlite_val_is_string(h);
+      const o = V.get(h);
+      return typeof o === "string" || o instanceof String;
     },
     emliteValIsNumber(h) {
-      return e().emlite_val_is_number(h);
+      const o = V.get(h);
+      return typeof o === "number" || o instanceof Number;
     },
     emliteValIsBool(h) {
-      return e().emlite_val_is_bool(h);
+      const o = V.get(h);
+      return typeof o === "boolean" || o instanceof Boolean;
     },
     emliteValGt(a, b) {
-      return e().emlite_val_gt(a, b);
+      return V.get(a) > V.get(b);
     },
     emliteValGte(a, b) {
-      return e().emlite_val_gte(a, b);
+      return V.get(a) >= V.get(b);
     },
     emliteValLt(a, b) {
-      return e().emlite_val_lt(a, b);
+      return V.get(a) < V.get(b);
     },
     emliteValLte(a, b) {
-      return e().emlite_val_lte(a, b);
+      return V.get(a) <= V.get(b);
     },
     emliteValEquals(a, b) {
-      return e().emlite_val_equals(a, b);
+      return V.get(a) == V.get(b);
     },
     emliteValStrictlyEquals(a, b) {
-      return e().emlite_val_strictly_equals(a, b);
+      return V.get(a) === V.get(b);
     },
     emliteValInstanceof(a, b) {
-      return e().emlite_val_instanceof(a, b);
+      const A = V.get(a),
+        B = V.get(b);
+      try {
+        return A instanceof B;
+      } catch {
+        return false;
+      }
+    },
+
+    emliteValObjHasOwnProp(obj, prop) {
+      const t = V.get(obj);
+      return Object.prototype.hasOwnProperty.call(t, prop);
+    },
+    emliteValObjCall(obj, method, argv) {
+      let target = V.get(obj);
+      const list = V.get(argv);
+      const args = Array.isArray(list) ? list.map((h) => V.get(h)) : [];
+      // helpful DOM fallback
+      const domMethods = new Set([
+        "getElementsByTagName",
+        "getElementById",
+        "querySelector",
+        "querySelectorAll",
+        "createElement",
+      ]);
+      if (!target && domMethods.has(method) && typeof document !== "undefined")
+        target = document;
+      try {
+        const m = target?.[method];
+        return V.add(
+          typeof m === "function" ? Reflect.apply(m, target, args) : undefined
+        );
+      } catch (e) {
+        return V.add(normalizeThrown(e));
+      }
+    },
+
+    emliteValConstructNew(ctor, argv) {
+      const C = V.get(ctor);
+      const list = V.get(argv);
+      const args = Array.isArray(list) ? list.map((h) => V.get(h)) : [];
+      try {
+        return V.add(Reflect.construct(C, args));
+      } catch (e) {
+        return V.add(normalizeThrown(e));
+      }
+    },
+    emliteValFuncCall(fn, argv) {
+      const f = V.get(fn);
+      const list = V.get(argv);
+      const args = Array.isArray(list) ? list.map((h) => V.get(h)) : [];
+      try {
+        return V.add(Reflect.apply(f, undefined, args));
+      } catch (e) {
+        return V.add(normalizeThrown(e));
+      }
     },
 
     emliteValIncRef(h) {
-      return e().emlite_val_inc_ref(h);
+      V.incRef(h);
     },
     emliteValDecRef(h) {
-      return e().emlite_val_dec_ref(h);
+      if (h > 6) V.decRef(h);
     },
     emliteValThrow(h) {
-      return e().emlite_val_throw(h);
+      throw V.get(h);
     },
     emlitePrintObjectMap() {
-      return e().emlite_print_object_map();
+      /* optional: console.log(V) */
     },
     emliteResetObjectMap() {
-      return e().emlite_reset_object_map();
-    },
-
-    emliteValMakeStr(s /* string */) {
-      return VAL().add(String(s));
-    },
-    emliteValMakeStrUtf16(u16 /* list<u16> */) {
-      return VAL().add(u16ArrayToString(u16));
-    },
-    emliteValGetValueString(h /* -> string */) {
-      return String(VAL().get(h));
-    },
-    emliteValGetValueStringUtf16(h /* -> list<u16> */) {
-      return stringToU16Array(String(VAL().get(h)));
-    },
-    emliteValObjHasOwnProp(obj, prop /* string */) {
-      const target = VAL().get(obj);
-      return Object.prototype.hasOwnProperty.call(target, prop);
-    },
-
-    emliteValObjCall(obj, method, argv /* u32 handle */) {
-      const target = VAL().get(obj);
-      const args = VAL()
-        .get(argv)
-        .map((h) => VAL().get(h));
-      let ret;
-      try {
-        ret = Reflect.apply(target[method], target, args);
-      } catch (e) {
-        ret = norm(e);
-      }
-      return VAL().add(ret);
-    },
-
-    emliteValConstructNew(ctor, argv /* u32 handle */) {
-      const target = VAL().get(ctor);
-      const args = VAL()
-        .get(argv)
-        .map((h) => VAL().get(h));
-      let ret;
-      try {
-        ret = Reflect.construct(target, args);
-      } catch (e) {
-        ret = norm(e);
-      }
-      return VAL().add(ret);
-    },
-
-    emliteValFuncCall(fn, argv /* u32 handle */) {
-      const f = VAL().get(fn);
-      const args = VAL()
-        .get(argv)
-        .map((h) => VAL().get(h));
-      let ret;
-      try {
-        ret = Reflect.apply(f, undefined, args);
-      } catch (e) {
-        ret = norm(e);
-      }
-      return VAL().add(ret);
+      for (const h of [...V.h2e.keys()])
+        if (h > 6) {
+          const v = V.h2e.get(h).v;
+          V.h2e.delete(h);
+          V.v2h.delete(v);
+        }
     },
 
     emliteValMakeCallback(fidx, data) {
       const jsFn = (...values) => {
-        const handles = values.map((v) => VAL().add(v));
-        const argvHandle = VAL().add(handles);
+        const handles = values.map((v) => V.add(v));
+        const argvHandle = V.add(handles);
         const retHandle = apply(fidx, argvHandle, data);
-        return VAL().get(retHandle);
+        return V.get(retHandle);
       };
-      return VAL().add(jsFn);
+      return V.add(jsFn);
     },
   };
-}
 
-export const host = makeHost();
+  return host;
+}
