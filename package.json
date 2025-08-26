@@ -1,10 +1,14 @@
 {
   "name": "emlite",
-  "version": "0.1.33",
+  "version": "0.1.34",
   "description": "A tiny JS bridge for C/C++/Rust/Zig via wasm",
   "main": "src/emlite.js",
   "type": "module",
   "sideEffects": true,
+  "exports": {
+    ".": "./src/emlite.js",
+    "./wasip2adapter": "./src/wasip2adapter.js"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/emlite/emlite-js.git"
