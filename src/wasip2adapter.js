@@ -268,8 +268,7 @@ export function makeHost({ apply }) {
 
     emliteValMakeCallback(fidx, data) {
       const jsFn = (...values) => {
-        const handles = values.map((v) => V.add(v));
-        const argvHandle = V.add(handles);
+        const argvHandle = V.add(values);
         const retHandle = apply(fidx, argvHandle, data);
         return V.get(retHandle);
       };
