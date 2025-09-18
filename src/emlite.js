@@ -4,7 +4,7 @@
 // 1.0.23 => 1000023
 // 11.0.23 => 11000023
 // version = (major × 1 000 000) + (minor × 1 000) + patch
-const EMLITE_VERSION = 1037;
+export const EMLITE_VERSION = 1037;
 
 const enc = new TextEncoder("utf-8");
 const dec = new TextDecoder("utf-8");

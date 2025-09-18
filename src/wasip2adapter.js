@@ -1,3 +1,5 @@
+import { EMLITE_VERSION } from "./emlite.js";
+
 const norm = (e) => (globalThis.normalizeThrown ? normalizeThrown(e) : e);
 
 function stringToU16Array(s) {
@@ -16,9 +18,18 @@ function u16ArrayToString(arr) {
   return s;
 }
 
-export function makeHost({ emlite, apply }) {
+export function makeHost({ emlite, apply, target }) {
   const e = emlite.env;
   let VAL = null;
+  // Finalize Rust closures when the JS function is GC'd
+  const FR = typeof FinalizationRegistry !== 'undefined'
+    ? new FinalizationRegistry((data /* handle to boxed-closure pointer */) => {
+        try {
+          // argv == 0 is a sentinel to free the closure/data on the guest side
+          apply(0 /* argv sentinel */, data);
+        } catch {}
+      })
+    : null;
   return {
     __cxaAllocateException() {
       return e.__cxa_allocate_exception();
@@ -35,6 +46,23 @@ export function makeHost({ emlite, apply }) {
     emliteInitHandleTable() {
       e.emlite_init_handle_table();
       VAL = globalThis.EMLITE_VALMAP;
+      // Perform version check if the guest exported a target() function
+      try {
+        if (typeof target === 'function') {
+          const t = target();
+          if (t !== EMLITE_VERSION) {
+            console.warn(
+              "Probably using an incompatible version of emlite (wasip2); plowing through!"
+            );
+          }
+        } else {
+          console.warn(
+            "emlite_target is not defined for wasip2; it's advisable to export it via WIT."
+          );
+        }
+      } catch (err) {
+        console.warn("Failed to check emlite version (wasip2)", err);
+      }
     },
     emliteValNewArray() {
       return e.emlite_val_new_array();
@@ -196,6 +224,7 @@ export function makeHost({ emlite, apply }) {
         const retHandle = apply(fidx, argvHandle, data);
         return VAL.get(retHandle);
       };
+      if (FR) FR.register(jsFn, data);
       return VAL.add(jsFn);
     },
   };
