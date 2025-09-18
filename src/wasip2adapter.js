@@ -21,12 +21,10 @@ function u16ArrayToString(arr) {
 export function makeHost({ emlite, apply, target }) {
   const e = emlite.env;
   let VAL = null;
-  // Finalize Rust closures when the JS function is GC'd
   const FR = typeof FinalizationRegistry !== 'undefined'
     ? new FinalizationRegistry((data /* handle to boxed-closure pointer */) => {
         try {
-          // argv == 0 is a sentinel to free the closure/data on the guest side
-          apply(0 /* argv sentinel */, data);
+          apply(0, 0, data);
         } catch {}
       })
     : null;
