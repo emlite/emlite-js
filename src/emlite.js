@@ -5,6 +5,8 @@
 // 11.0.23 => 11000023
 // version = (major × 1 000 000) + (minor × 1 000) + patch
 const EMLITE_VERSION = 1039;
+// Handles 0..RESERVED_MAX are reserved in the global value map
+const RESERVED_MAX = 6;
 
 const enc = new TextEncoder("utf-8");
 const dec = new TextDecoder("utf-8");
@@ -23,11 +25,15 @@ function u16ArrayToString(arr) {
   return s;
 }
 
-const norm = (e) => (globalThis.normalizeThrown ? normalizeThrown(e) : e);
+// Safely normalize non-Error throws without relying on undeclared identifiers
+const norm = (e) =>
+  typeof globalThis.normalizeThrown === "function"
+    ? globalThis.normalizeThrown(e)
+    : e;
 
 let apply = () => {
-    throw new Error("dyncall.apply not wired yet");
-  };
+  throw new Error("dyncall.apply not wired yet");
+};
 let target = () => -1;
 
 export class Emlite {
@@ -40,11 +46,20 @@ export class Emlite {
    *        }
    */
   constructor(opts = {}) {
-    const { memory = undefined, env = {}, globals = {} } = opts;
+    const {
+      memory = undefined,
+      env = {},
+      globals = {},
+      exposeHeaps = true,
+      initialPages = 258,
+      maximumPages = 4096,
+    } = opts;
 
     this._memory =
-      memory ?? new WebAssembly.Memory({ initial: 258, maximum: 4096 });
+      memory ??
+      new WebAssembly.Memory({ initial: initialPages, maximum: maximumPages });
     this._extraEnv = { ...env };
+    this._exposeHeaps = !!exposeHeaps;
     for (const [name, value] of Object.entries(globals)) {
       if (name in globalThis) {
         console.warn(`[Emlite] globalThis.${name} already exists; skipping`);
@@ -55,9 +70,13 @@ export class Emlite {
     this._updateViews();
   }
 
-  envIsBrowser() {
+  // Environment detection
+  isBrowser() {
     // eslint-disable-next-line no-undef
     return typeof window !== "undefined" && "document" in window;
+  }
+  envIsBrowser() {
+    return this.isBrowser();
   }
 
   async dynamicImport(id) {
@@ -71,13 +90,14 @@ export class Emlite {
    * @return {ArrayBuffer}
    */
   async readFile(url) {
-    if (this.envIsBrowser()) {
+    if (this.isBrowser()) {
       let buf = await fetch(url);
       return await buf.arrayBuffer();
     } else {
       const { readFile } = await this.dynamicImport("node:fs/promises");
       const buf = await readFile(url);
-      return buf.buffer.slice();
+      // Return an ArrayBuffer view over the Buffer bytes
+      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
     }
   }
 
@@ -99,14 +119,16 @@ export class Emlite {
     this._f32 = new Float32Array(b);
     this._f64 = new Float64Array(b);
 
-    globalThis.HEAP8 = this._i8;
-    globalThis.HEAPU8 = this._u8;
-    globalThis.HEAP16 = this._i16;
-    globalThis.HEAPU16 = this._u16;
-    globalThis.HEAP32 = this._i32;
-    globalThis.HEAPU32 = this._u32;
-    globalThis.HEAPF32 = this._f32;
-    globalThis.HEAPF64 = this._f64;
+    if (this._exposeHeaps) {
+      globalThis.HEAP8 = this._i8;
+      globalThis.HEAPU8 = this._u8;
+      globalThis.HEAP16 = this._i16;
+      globalThis.HEAPU16 = this._u16;
+      globalThis.HEAP32 = this._i32;
+      globalThis.HEAPU32 = this._u32;
+      globalThis.HEAPF32 = this._f32;
+      globalThis.HEAPF64 = this._f64;
+    }
   }
 
   /**
@@ -295,24 +317,27 @@ export class Emlite {
         globalThis.normalizeThrown = normalizeThrown;
       },
 
-      emlite_val_new_array: () => EMLITE_VALMAP.add([]),
-      emlite_val_new_object: () => EMLITE_VALMAP.add({}),
-      emlite_val_make_bool: (value) => EMLITE_VALMAP.add(!!value),
-      emlite_val_make_int: (value) => EMLITE_VALMAP.add(value | 0), // 32-bit signed: -2^31 to 2^31-1
-      emlite_val_make_uint: (value) => EMLITE_VALMAP.add(value >>> 0), // 32-bit unsigned: 0 to 2^32-1
-      emlite_val_make_bigint: (value) => EMLITE_VALMAP.add(BigInt(value)), // 64-bit signed BigInt
+      emlite_val_new_array: () => globalThis.EMLITE_VALMAP.add([]),
+      emlite_val_new_object: () => globalThis.EMLITE_VALMAP.add({}),
+      emlite_val_make_bool: (value) => globalThis.EMLITE_VALMAP.add(!!value),
+      emlite_val_make_int: (value) => globalThis.EMLITE_VALMAP.add(value | 0), // 32-bit signed: -2^31 to 2^31-1
+      emlite_val_make_uint: (value) =>
+        globalThis.EMLITE_VALMAP.add(value >>> 0), // 32-bit unsigned: 0 to 2^32-1
+      emlite_val_make_bigint: (value) =>
+        globalThis.EMLITE_VALMAP.add(BigInt(value)), // 64-bit signed BigInt
       emlite_val_make_biguint: (value) => {
         let x = BigInt(value); // may be negative due to signed i64 view
         if (x < 0n) x += 1n << 64n; // normalize to [0, 2^64-1]
-        return EMLITE_VALMAP.add(x);
+        return globalThis.EMLITE_VALMAP.add(x);
       },
-      emlite_val_make_double: (n) => EMLITE_VALMAP.add(n),
-      emlite_val_make_str: (ptr, len) => EMLITE_VALMAP.add(this.cStr(ptr, len)),
+      emlite_val_make_double: (n) => globalThis.EMLITE_VALMAP.add(n),
+      emlite_val_make_str: (ptr, len) =>
+        globalThis.EMLITE_VALMAP.add(this.cStr(ptr, len)),
       emlite_val_make_str_utf16: (ptr, len) =>
-        EMLITE_VALMAP.add(this.cStrUtf16(ptr, len)),
+        globalThis.EMLITE_VALMAP.add(this.cStrUtf16(ptr, len)),
 
       emlite_val_get_value_int: (n) => {
-        const val = EMLITE_VALMAP.get(n);
+        const val = globalThis.EMLITE_VALMAP.get(n);
         if (typeof val === "bigint") {
           // Preserve lower 32 bits and signedness without precision loss
           return Number(BigInt.asIntN(32, val));
@@ -320,7 +345,7 @@ export class Emlite {
         return val | 0; // 32-bit signed conversion
       },
       emlite_val_get_value_uint: (n) => {
-        const val = EMLITE_VALMAP.get(n);
+        const val = globalThis.EMLITE_VALMAP.get(n);
         if (typeof val === "bigint") {
           // Preserve lower 32 bits as unsigned without precision loss
           return Number(BigInt.asUintN(32, val));
@@ -328,85 +353,95 @@ export class Emlite {
         return val >>> 0; // 32-bit unsigned conversion
       },
       emlite_val_get_value_bigint: (h) => {
-        const v = EMLITE_VALMAP.get(h);
+        const v = globalThis.EMLITE_VALMAP.get(h);
         if (typeof v === "bigint") return v; // already BigInt
         return BigInt(Math.trunc(Number(v))); // coerce number → BigInt
       },
       emlite_val_get_value_biguint: (h) => {
-        const v = EMLITE_VALMAP.get(h);
+        const v = globalThis.EMLITE_VALMAP.get(h);
         if (typeof v === "bigint") return v >= 0n ? v : 0n; // clamp negative
         const n = Math.trunc(Number(v));
         return BigInt(n >= 0 ? n : 0); // clamp to unsigned
       },
-      emlite_val_get_value_double: (n) => Number(EMLITE_VALMAP.get(n)),
+      emlite_val_get_value_double: (n) =>
+        Number(globalThis.EMLITE_VALMAP.get(n)),
       emlite_val_get_value_string: (n) =>
-        this.copyStringToWasm(EMLITE_VALMAP.get(n)),
+        this.copyStringToWasm(globalThis.EMLITE_VALMAP.get(n)),
       emlite_val_get_value_string_utf16: (n) =>
-        this.copyStringToWasmUtf16(EMLITE_VALMAP.get(n)),
-      emlite_val_get_value_bool: (h) => (EMLITE_VALMAP.get(h) ? 1 : 0),
+        this.copyStringToWasmUtf16(globalThis.EMLITE_VALMAP.get(n)),
+      emlite_val_get_value_bool: (h) =>
+        globalThis.EMLITE_VALMAP.get(h) ? 1 : 0,
       emlite_val_typeof: (n) =>
-        this.copyStringToWasm(typeof EMLITE_VALMAP.get(n)),
+        this.copyStringToWasm(typeof globalThis.EMLITE_VALMAP.get(n)),
 
       emlite_val_push: (arrRef, valRef) => {
         try {
-          EMLITE_VALMAP.get(arrRef).push(valRef);
+          globalThis.EMLITE_VALMAP.get(arrRef).push(valRef);
         } catch {
           /* empty */
         }
       },
       emlite_val_get: (n, idx) =>
-        EMLITE_VALMAP.add(EMLITE_VALMAP.get(n)[EMLITE_VALMAP.get(idx)]),
+        globalThis.EMLITE_VALMAP.add(
+          globalThis.EMLITE_VALMAP.get(n)[globalThis.EMLITE_VALMAP.get(idx)]
+        ),
       emlite_val_set: (n, idx, valRef) =>
-        (EMLITE_VALMAP.get(n)[EMLITE_VALMAP.get(idx)] =
-          EMLITE_VALMAP.get(valRef)),
+        (globalThis.EMLITE_VALMAP.get(n)[globalThis.EMLITE_VALMAP.get(idx)] =
+          globalThis.EMLITE_VALMAP.get(valRef)),
       emlite_val_has: (objRef, valRef) => {
         try {
           return Reflect.has(
-            EMLITE_VALMAP.get(objRef),
-            EMLITE_VALMAP.get(valRef)
+            globalThis.EMLITE_VALMAP.get(objRef),
+            globalThis.EMLITE_VALMAP.get(valRef)
           );
         } catch {
           return false;
         }
       },
-      emlite_val_not: (arg) => !EMLITE_VALMAP.get(arg),
+      emlite_val_not: (arg) => !globalThis.EMLITE_VALMAP.get(arg),
       emlite_val_is_string: (arg) => {
-        const obj = EMLITE_VALMAP.get(arg);
+        const obj = globalThis.EMLITE_VALMAP.get(arg);
         return typeof obj === "string" || obj instanceof String;
       },
       emlite_val_is_number: (arg) => {
-        const obj = EMLITE_VALMAP.get(arg);
+        const obj = globalThis.EMLITE_VALMAP.get(arg);
         return typeof obj === "number" || obj instanceof Number;
       },
       emlite_val_is_bool: (h) => {
-        const v = EMLITE_VALMAP.get(h);
+        const v = globalThis.EMLITE_VALMAP.get(h);
         return (typeof v === "boolean" || v instanceof Boolean) | 0;
       },
-      emlite_val_gt: (a, b) => EMLITE_VALMAP.get(a) > EMLITE_VALMAP.get(b),
-      emlite_val_gte: (a, b) => EMLITE_VALMAP.get(a) >= EMLITE_VALMAP.get(b),
-      emlite_val_lt: (a, b) => EMLITE_VALMAP.get(a) < EMLITE_VALMAP.get(b),
-      emlite_val_lte: (a, b) => EMLITE_VALMAP.get(a) <= EMLITE_VALMAP.get(b),
-      emlite_val_equals: (a, b) => EMLITE_VALMAP.get(a) == EMLITE_VALMAP.get(b),
+      emlite_val_gt: (a, b) =>
+        globalThis.EMLITE_VALMAP.get(a) > globalThis.EMLITE_VALMAP.get(b),
+      emlite_val_gte: (a, b) =>
+        globalThis.EMLITE_VALMAP.get(a) >= globalThis.EMLITE_VALMAP.get(b),
+      emlite_val_lt: (a, b) =>
+        globalThis.EMLITE_VALMAP.get(a) < globalThis.EMLITE_VALMAP.get(b),
+      emlite_val_lte: (a, b) =>
+        globalThis.EMLITE_VALMAP.get(a) <= globalThis.EMLITE_VALMAP.get(b),
+      emlite_val_equals: (a, b) =>
+        globalThis.EMLITE_VALMAP.get(a) == globalThis.EMLITE_VALMAP.get(b),
       emlite_val_strictly_equals: (a, b) =>
-        EMLITE_VALMAP.get(a) === EMLITE_VALMAP.get(b),
+        globalThis.EMLITE_VALMAP.get(a) === globalThis.EMLITE_VALMAP.get(b),
       emlite_val_instanceof: (a, b) =>
-        EMLITE_VALMAP.get(a) instanceof EMLITE_VALMAP.get(b),
+        globalThis.EMLITE_VALMAP.get(a) instanceof
+        globalThis.EMLITE_VALMAP.get(b),
       emlite_val_obj_has_own_prop: (objRef, pPtr, pLen) => {
-        const target = EMLITE_VALMAP.get(objRef);
+        const target = globalThis.EMLITE_VALMAP.get(objRef);
         const prop = this.cStr(pPtr, pLen);
         return Object.prototype.hasOwnProperty.call(target, prop);
       },
-      emlite_val_inc_ref: (h) => EMLITE_VALMAP.incRef(h),
+      emlite_val_inc_ref: (h) => globalThis.EMLITE_VALMAP.incRef(h),
       emlite_val_dec_ref: (h) => {
-        if (h > 6) EMLITE_VALMAP.decRef(h);
+        if (h > RESERVED_MAX) globalThis.EMLITE_VALMAP.decRef(h);
       },
       emlite_val_throw: (n) => {
-        throw EMLITE_VALMAP.get(n);
+        throw globalThis.EMLITE_VALMAP.get(n);
       },
 
       emlite_val_make_callback: (fidx, data) => {
         const jsFn = (...args) => {
-          const arrHandle = EMLITE_VALMAP.add(args.map((v) => v));
+          const arrHandle = globalThis.EMLITE_VALMAP.add(args.map((v) => v));
           let ret;
           try {
             ret = this.exports.__indirect_function_table.get(fidx)(
@@ -414,64 +449,64 @@ export class Emlite {
               data
             );
           } catch (e) {
-            ret = normalizeThrown(e);
+            ret = norm(e);
           }
           return ret;
         };
-        return EMLITE_VALMAP.add(jsFn);
+        return globalThis.EMLITE_VALMAP.add(jsFn);
       },
 
       emlite_val_obj_call: (objRef, mPtr, mLen, argvRef) => {
-        const target = EMLITE_VALMAP.get(objRef);
+        const target = globalThis.EMLITE_VALMAP.get(objRef);
         const method = this.cStr(mPtr, mLen);
-        const args = EMLITE_VALMAP.get(argvRef).map((h) =>
-          EMLITE_VALMAP.get(h)
+        const args = globalThis.EMLITE_VALMAP.get(argvRef).map((h) =>
+          globalThis.EMLITE_VALMAP.get(h)
         );
         let ret;
         try {
           ret = Reflect.apply(target[method], target, args);
         } catch (e) {
-          ret = normalizeThrown(e);
+          ret = norm(e);
         }
-        return EMLITE_VALMAP.add(ret);
+        return globalThis.EMLITE_VALMAP.add(ret);
       },
       emlite_val_construct_new: (objRef, argvRef) => {
-        const target = EMLITE_VALMAP.get(objRef);
-        const args = EMLITE_VALMAP.get(argvRef).map((h) =>
-          EMLITE_VALMAP.get(h)
+        const target = globalThis.EMLITE_VALMAP.get(objRef);
+        const args = globalThis.EMLITE_VALMAP.get(argvRef).map((h) =>
+          globalThis.EMLITE_VALMAP.get(h)
         );
         let ret;
         try {
           ret = Reflect.construct(target, args);
         } catch (e) {
-          ret = normalizeThrown(e);
+          ret = norm(e);
         }
-        return EMLITE_VALMAP.add(ret);
+        return globalThis.EMLITE_VALMAP.add(ret);
       },
       emlite_val_func_call: (objRef, argvRef) => {
-        const target = EMLITE_VALMAP.get(objRef);
-        const args = EMLITE_VALMAP.get(argvRef).map((h) =>
-          EMLITE_VALMAP.get(h)
+        const target = globalThis.EMLITE_VALMAP.get(objRef);
+        const args = globalThis.EMLITE_VALMAP.get(argvRef).map((h) =>
+          globalThis.EMLITE_VALMAP.get(h)
         );
         let ret;
         try {
           ret = Reflect.apply(target, undefined, args);
         } catch (e) {
-          ret = normalizeThrown(e);
+          ret = norm(e);
         }
-        return EMLITE_VALMAP.add(ret);
+        return globalThis.EMLITE_VALMAP.add(ret);
       },
       // eslint-disable-next-line no-unused-vars
       emscripten_notify_memory_growth: (i) => this._updateViews(),
       _msync_js: () => {},
-      emlite_print_object_map: () => console.log(EMLITE_VALMAP),
+      emlite_print_object_map: () => console.log(globalThis.EMLITE_VALMAP),
       emlite_reset_object_map: () => {
-        for (const h of [...EMLITE_VALMAP._h2e.keys()]) {
-          if (h > 6) {
-            const value = EMLITE_VALMAP._h2e.get(h).value;
+        for (const h of [...globalThis.EMLITE_VALMAP._h2e.keys()]) {
+          if (h > RESERVED_MAX) {
+            const value = globalThis.EMLITE_VALMAP._h2e.get(h).value;
 
-            EMLITE_VALMAP._h2e.delete(h);
-            EMLITE_VALMAP._v2h.delete(value);
+            globalThis.EMLITE_VALMAP._h2e.delete(h);
+            globalThis.EMLITE_VALMAP._v2h.delete(value);
           }
         }
       },
@@ -482,7 +517,7 @@ export class Emlite {
       ...this._extraEnv,
     };
   }
-  get wasiHost() {
+  get componentHost() {
     const e = this.env;
     let VAL = null;
     const FR =
@@ -695,8 +730,11 @@ export class Emlite {
       },
     };
   }
-  wireWasiExports(app) {
+  bindComponent(app) {
     apply = app["emlite:env/dyncall@0.1.0"]?.apply;
     target = app["emlite:env/dyncall@0.1.0"]?.emliteTarget;
+  }
+  get version() {
+    return EMLITE_VERSION;
   }
 }
