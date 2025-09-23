@@ -136,15 +136,6 @@ export class Emlite {
    * @param {WebAssembly.Exports} exports
    */
   setExports(exports) {
-    if (typeof exports.emlite_target === "undefined") {
-      console.warn(
-        "emlite_target is not defined, it's advisable to use an emlite version above 0.1.23."
-      );
-    } else if (EMLITE_VERSION !== exports.emlite_target()) {
-      console.warn(
-        "Probably using an incompatible version of emlite, plowing through!"
-      );
-    }
     this.exports = exports;
   }
 
@@ -179,9 +170,9 @@ export class Emlite {
   copyStringToWasm(str) {
     if (!str || !(typeof str === "string" || str instanceof String)) return 0;
     this._ensureViewsFresh();
-    if (typeof this.exports.emlite_malloc !== "undefined") {
+    if (typeof this.exports.malloc !== "undefined") {
       const utf8 = enc.encode(str + "\0");
-      const ptr = this.exports.emlite_malloc(utf8.length);
+      const ptr = this.exports.malloc(utf8.length);
       if (ptr === 0) throw new Error("malloc failed in copyStringToWasm");
       // new Uint8Array(this._memory.buffer).set(utf8, ptr);
       this._u8.set(utf8, ptr);
@@ -199,10 +190,10 @@ export class Emlite {
   copyStringToWasmUtf16(str) {
     if (!str || !(typeof str === "string" || str instanceof String)) return 0;
     this._ensureViewsFresh();
-    if (typeof this.exports.emlite_malloc !== "undefined") {
+    if (typeof this.exports.malloc !== "undefined") {
       // Each char16_t is 2 bytes, +1 for null terminator
       const byteLength = (str.length + 1) * 2;
-      const ptr = this.exports.emlite_malloc(byteLength);
+      const ptr = this.exports.malloc(byteLength);
       if (ptr === 0) throw new Error("malloc failed in copyStringToWasmUtf16");
 
       // Ensure 2-byte alignment
@@ -510,6 +501,7 @@ export class Emlite {
           }
         }
       },
+      emlite_target: () => EMLITE_VERSION,
     };
     return {
       memory: this._memory,
@@ -519,7 +511,6 @@ export class Emlite {
   }
   get componentHost() {
     const e = this.env;
-    let VAL = null;
     const FR =
       typeof FinalizationRegistry !== "undefined"
         ? new FinalizationRegistry(
@@ -546,24 +537,6 @@ export class Emlite {
       },
       emliteInitHandleTable() {
         e.emlite_init_handle_table();
-        VAL = globalThis.EMLITE_VALMAP;
-        // Perform version check if the guest exported a target() function
-        try {
-          if (typeof target === "function") {
-            const t = target();
-            if (t !== EMLITE_VERSION) {
-              console.warn(
-                "Probably using an incompatible version of emlite (wasip2); plowing through!"
-              );
-            }
-          } else {
-            console.warn(
-              "emlite_target is not defined for wasip2; it's advisable to export it via WIT."
-            );
-          }
-        } catch (err) {
-          console.warn("Failed to check emlite version (wasip2)", err);
-        }
       },
       emliteValNewArray() {
         return e.emlite_val_new_array();
@@ -608,7 +581,7 @@ export class Emlite {
         return e.emlite_val_get_value_bool(h);
       },
       emliteValTypeof(h) {
-        return typeof VAL.get(h);
+        return typeof globalThis.EMLITE_VALMAP.get(h);
       },
       emliteValPush(a, v) {
         return e.emlite_val_push(a, v);
@@ -671,68 +644,76 @@ export class Emlite {
         return e.emlite_reset_object_map();
       },
       emliteValMakeStr(s /* string */) {
-        return VAL.add(String(s));
+        return globalThis.EMLITE_VALMAP.add(String(s));
       },
       emliteValMakeStrUtf16(u16 /* list<u16> */) {
-        return VAL.add(u16ArrayToString(u16));
+        return globalThis.EMLITE_VALMAP.add(u16ArrayToString(u16));
       },
       emliteValGetValueString(h /* -> string */) {
-        return String(VAL.get(h));
+        return String(globalThis.EMLITE_VALMAP.get(h));
       },
       emliteValGetValueStringUtf16(h /* -> list<u16> */) {
-        return stringToU16Array(String(VAL.get(h)));
+        return stringToU16Array(String(globalThis.EMLITE_VALMAP.get(h)));
       },
       emliteValObjHasOwnProp(obj, prop /* string */) {
-        const target = VAL.get(obj);
+        const target = globalThis.EMLITE_VALMAP.get(obj);
         return Object.prototype.hasOwnProperty.call(target, prop);
       },
       emliteValObjCall(obj, method, argv /* u32 handle */) {
-        const target = VAL.get(obj);
-        const args = VAL.get(argv).map((h) => VAL.get(h));
+        const target = globalThis.EMLITE_VALMAP.get(obj);
+        const args = globalThis.EMLITE_VALMAP.get(argv).map((h) =>
+          globalThis.EMLITE_VALMAP.get(h)
+        );
         let ret;
         try {
           ret = Reflect.apply(target[method], target, args);
         } catch (e) {
           ret = norm(e);
         }
-        return VAL.add(ret);
+        return globalThis.EMLITE_VALMAP.add(ret);
       },
       emliteValConstructNew(ctor, argv /* u32 handle */) {
-        const target = VAL.get(ctor);
-        const args = VAL.get(argv).map((h) => VAL.get(h));
+        const target = globalThis.EMLITE_VALMAP.get(ctor);
+        const args = globalThis.EMLITE_VALMAP.get(argv).map((h) =>
+          globalThis.EMLITE_VALMAP.get(h)
+        );
         let ret;
         try {
           ret = Reflect.construct(target, args);
         } catch (e) {
           ret = norm(e);
         }
-        return VAL.add(ret);
+        return globalThis.EMLITE_VALMAP.add(ret);
       },
       emliteValFuncCall(fn, argv /* u32 handle */) {
-        const f = VAL.get(fn);
-        const args = VAL.get(argv).map((h) => VAL.get(h));
+        const f = globalThis.EMLITE_VALMAP.get(fn);
+        const args = globalThis.EMLITE_VALMAP.get(argv).map((h) =>
+          globalThis.EMLITE_VALMAP.get(h)
+        );
         let ret;
         try {
           ret = Reflect.apply(f, undefined, args);
         } catch (e) {
           ret = norm(e);
         }
-        return VAL.add(ret);
+        return globalThis.EMLITE_VALMAP.add(ret);
       },
       emliteValMakeCallback(fidx, data) {
         const jsFn = (...values) => {
-          const argvHandle = VAL.add(values);
+          const argvHandle = globalThis.EMLITE_VALMAP.add(values);
           const retHandle = apply(fidx, argvHandle, data);
-          return VAL.get(retHandle);
+          return globalThis.EMLITE_VALMAP.get(retHandle);
         };
         if (FR) FR.register(jsFn, data);
-        return VAL.add(jsFn);
+        return globalThis.EMLITE_VALMAP.add(jsFn);
+      },
+      emliteTarget() {
+        return EMLITE_VERSION;
       },
     };
   }
   bindComponent(app) {
     apply = app["emlite:env/dyncall@0.1.0"]?.apply;
-    target = app["emlite:env/dyncall@0.1.0"]?.emliteTarget;
   }
   get version() {
     return EMLITE_VERSION;
