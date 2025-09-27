@@ -4,7 +4,7 @@
 // 1.0.23 => 1000023
 // 11.0.23 => 11000023
 // version = (major × 1 000 000) + (minor × 1 000) + patch
-const EMLITE_VERSION = 1041;
+const EMLITE_VERSION = 1042;
 // Handles 0..RESERVED_MAX are reserved in the global value map
 const RESERVED_MAX = 6;
 
@@ -162,6 +162,19 @@ export class Emlite {
     return dec_16.decode(this._u8.subarray(ptr, ptr + len * 2));
   }
 
+  alloc(n, align) {
+    if (typeof this.exports.malloc === "function") {
+      return this.exports.malloc(n) >>> 0;
+    }
+    if (typeof this.exports.emlite_malloc === "function") {
+      return this.exports.emlite_malloc(n) >>> 0;
+    }
+    if (typeof this.exports.cabi_realloc === "function") {
+      return this.exports.cabi_realloc(0, 0, align | 0, n | 0) >>> 0;
+    }
+    return 0;
+  }
+
   /**
    * Convert a javascript string to a C string
    * @param {string} str - The javascript string
@@ -169,17 +182,13 @@ export class Emlite {
    */
   copyStringToWasm(str) {
     if (!str || !(typeof str === "string" || str instanceof String)) return 0;
+    const utf8 = enc.encode(str + "\0");
+    const ptr = this.alloc(utf8.length);
+    if (ptr === 0) throw new Error("malloc failed in copyStringToWasm");
+    // new Uint8Array(this._memory.buffer).set(utf8, ptr);
     this._ensureViewsFresh();
-    if (typeof this.exports.malloc !== "undefined") {
-      const utf8 = enc.encode(str + "\0");
-      const ptr = this.exports.malloc(utf8.length);
-      if (ptr === 0) throw new Error("malloc failed in copyStringToWasm");
-      // new Uint8Array(this._memory.buffer).set(utf8, ptr);
-      this._u8.set(utf8, ptr);
-      return ptr;
-    } else {
-      return 0;
-    }
+    this._u8.set(utf8, ptr);
+    return ptr;
   }
 
   /**
@@ -190,27 +199,24 @@ export class Emlite {
   copyStringToWasmUtf16(str) {
     if (!str || !(typeof str === "string" || str instanceof String)) return 0;
     this._ensureViewsFresh();
-    if (typeof this.exports.malloc !== "undefined") {
-      // Each char16_t is 2 bytes, +1 for null terminator
-      const byteLength = (str.length + 1) * 2;
-      const ptr = this.exports.malloc(byteLength);
-      if (ptr === 0) throw new Error("malloc failed in copyStringToWasmUtf16");
+    // Each char16_t is 2 bytes, +1 for null terminator
+    const byteLength = (str.length + 1) * 2;
+    const ptr = this.alloc(byteLength);
+    if (ptr === 0) throw new Error("malloc failed in copyStringToWasmUtf16");
 
-      // Ensure 2-byte alignment
-      if (ptr % 2 !== 0) throw new Error("UTF-16 string not properly aligned");
-
-      const startIdx = ptr >>> 1;
-      // Copy string characters
-      for (let i = 0; i < str.length; i++) {
-        this._u16[startIdx + i] = str.charCodeAt(i);
-      }
-      // Add null terminator
-      this._u16[startIdx + str.length] = 0;
-
-      return ptr;
-    } else {
-      return 0;
+    // Ensure 2-byte alignment
+    if (ptr % 2 !== 0) throw new Error("UTF-16 string not properly aligned");
+    
+    this._ensureViewsFresh();
+    const startIdx = ptr >>> 1;
+    // Copy string characters
+    for (let i = 0; i < str.length; i++) {
+      this._u16[startIdx + i] = str.charCodeAt(i);
     }
+    // Add null terminator
+    this._u16[startIdx + str.length] = 0;
+
+    return ptr;
   }
 
   /** Returns the env required for wasm instantiation. @returns {Object} env object */
